@@ -101,7 +101,8 @@ def insert_calendar(
     events: Dict[str, List[DailyEvent]],
     day_font=None,
     border=False,
-    include_year=False,  # true == full page overview of the month
+    full_page=False,
+    display_year=True,
     ysize=None,
 ):
     if not ysize:
@@ -113,11 +114,14 @@ def insert_calendar(
     doc.set_text_color(255)
     doc.set_fill_color(40)
 
-    if include_year:
+    if display_year:
         header = "%s %04d" % (MONTHS[mon], year)
-        link = links_mapping["%04d" % (year)]
     else:
         header = MONTHS[mon]
+
+    if full_page:
+        link = links_mapping["%04d" % (year)]
+    else:
         link = links_mapping["%04d-%02d" % (year, mon)]
 
     doc.set_xy(x, y)
@@ -239,7 +243,6 @@ def add_day_page(
         cal_y,
         links_mapping,
         events,
-        include_year=True,
         ysize=cal_size - 0.0,
     )
 
@@ -328,11 +331,15 @@ def generate_links(doc: FPDF) -> Dict[str, int]:
     doc.add_page()
 
     links_mapping: Dict[str, int] = {}
+
+    # link for year page
     links_mapping["%04d" % (year)] = doc.add_link()
+
     for mon in range(1, 12 + 1):
-        # month overview page
+        # link for month overview page
         links_mapping["%04d-%02d" % (year, mon)] = doc.add_link()
 
+        # links for day page
         for day in range(1, 31 + 1):
             links_mapping["%04d-%02d-%02d" % (year, mon, day)] = doc.add_link()
 
@@ -344,7 +351,7 @@ def generate_links(doc: FPDF) -> Dict[str, int]:
     return links_mapping
 
 
-def add_month_pages(
+def add_months_page(
     doc: FPDF, links: Dict[str, int], events: Dict[str, List[DailyEvent]]
 ):
     for mon in range(0, 12):
@@ -360,6 +367,7 @@ def add_month_pages(
             (mon // 3) * ysize + 20,
             links,
             events,
+            display_year=False,
             ysize=8,
         )
 
@@ -417,7 +425,7 @@ if __name__ == "__main__":
     events: Dict[str, List[DailyEvent]] = {}
     collect_holidays(year, events, zone=args["zone"])
 
-    add_month_pages(doc, links_mapping, events)
+    add_months_page(doc, links_mapping, events)
 
     time_block_line_width = args["linewidth"]
     time_block_line_color = args["linecolor"]
@@ -439,7 +447,7 @@ if __name__ == "__main__":
             events,
             day_font=12,
             border=True,
-            include_year=True,
+            full_page=True,
             ysize=36,
         )
 
