@@ -6,13 +6,17 @@ import argparse
 import datetime
 import locale
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, cast, DefaultDict, Dict, List, Tuple, Optional
 
 from fpdf import FPDF
-from process_vacances_scolaires import collect_holidays
+from jours_feries_france import JoursFeries
+from vacances_scolaires_france import SchoolHolidayDates
 
-LOGGER = logging.getLogger()
+LOGGER = logging.getLogger(__name__)
+LOGGER.addHandler(logging.StreamHandler())
+LOGGER.setLevel(logging.INFO)
 
 FONT = "dejavu"
 
@@ -26,8 +30,8 @@ RIGHT_MARGIN = 20
 TOP_MARGIN = 20
 BOTTOM_MARGIN = 20
 
-MONTH_COLOR = [
-    None,
+MONTH_COLOR: List[Tuple[int, int, int]] = [
+    (-1, -1, -1),  # month 0
     (211, 211, 211),
     (128, 0, 128),
     (0, 128, 0),
@@ -48,7 +52,7 @@ locale.setlocale(locale.LC_ALL, "")
 
 @dataclass
 class DailyEvent:
-    day: str
+    start: datetime.datetime
     duration: int
     title: str
 
@@ -114,7 +118,7 @@ def insert_calendar(
     x: int,
     y: int,
     links_mapping: Dict[str, int],
-    events: Dict[str, List[DailyEvent]],
+    events: Dict[str, Dict[str, List[DailyEvent]]],
     day_font=None,
     border=False,
     full_page=False,
@@ -207,10 +211,10 @@ def insert_calendar(
         all_day = ""
         for hms, evs in sorted(day_events.items()):
             for ev in evs:
-                if hms != "00:00" or ev[0] != 0:
+                if hms != "00:00" or ev.duration != 0:
                     # not an all day event
                     continue
-                all_day += ev[1] + "\n"
+                all_day += ev.title + "\n"
         if all_day:
             doc.set_xy(day_x + 1, day_y + day_font / 2 + 2)
             doc.multi_cell(
@@ -227,7 +231,7 @@ def add_day_page(
     mon: int,
     day: int,
     links_mapping: Dict[str, int],
-    events: Dict[str, List[DailyEvent]],
+    events: Dict[str, Dict[str, List[DailyEvent]]],
     *,
     time_block_line_width: int,
     time_block_line_color: int,
@@ -241,7 +245,6 @@ def add_day_page(
     doc.add_page()
     doc.set_link(links_mapping[ymd])
 
-    start_h = 8
     cal_size = 8
     date_y = 0
     cal_w = 7 * cal_size
@@ -300,10 +303,9 @@ def add_day_page(
         if line_y < cal_y + cal_h:
             line_x = cal_x - 8
         else:
-        	line_x = PAGE_WIDTH - RIGHT_MARGIN
+            line_x = PAGE_WIDTH - RIGHT_MARGIN
 
         doc.line(LEFT_MARGIN, line_y, line_x, line_y)
-
 
     # add prepopulated entries if there are any
     if not (day_events := events.get(ymd)):
@@ -313,17 +315,11 @@ def add_day_page(
 
     doc.set_font(FONT, "", 10)
     line_x = cal_x - 8
-    ev_x_base = LEFT_MARGIN + line_height + 2
-    ev_w = (line_x - ev_x_base - 10) / 2
 
-    # support up to three overlapping events
-    tracks = [0, 0, 0]
-
-    events_text: str = ""
     for hms, evs in sorted(day_events.items()):
         for ev in evs:
-            if hms == "00:00" and ev[0] == 0:
-                all_day += ev[1] + "\n"
+            if hms == "00:00" and ev.duration == 0:
+                all_day += ev.title + "\n"
                 continue
 
     if all_day:
@@ -368,7 +364,7 @@ def generate_links(doc: FPDF) -> Dict[str, int]:
 
 
 def add_months_page(
-    doc: FPDF, links: Dict[str, int], events: Dict[str, List[DailyEvent]]
+    doc: FPDF, links: Dict[str, int], events: Dict[str, Dict[str, List[DailyEvent]]]
 ):
     for mon in range(0, 12):
         xsize = 9 * 7
@@ -418,14 +414,69 @@ def get_parser() -> argparse.ArgumentParser:
         default=200,
     )
     parser.add_argument(
-        "-z",
-        "--zone",
-        help="zone for holidays (C default)",
+        "--school-zone",
+        help="zone for French school holidays (default to C)",
         required=False,
         type=str,
-        default="C",
+    )
+    parser.add_argument(
+        "--bank-holidays",
+        help="zone for French bank holidays (default to Métropole)",
+        required=False,
+        type=str,
     )
     return parser
+
+
+def collect_french_holidays(
+    year: int,
+    events: DefaultDict[str, DefaultDict[str, List[DailyEvent]]],
+    school_zone: Optional[str],
+    bank_zone: Optional[str],
+):
+    school_holidays = (
+        SchoolHolidayDates().holidays_for_year_and_zone(year, school_zone)
+        if school_zone
+        else None
+    )
+    bank_holidays: Optional[DefaultDict[datetime.date, List[str]]] = (
+        defaultdict(list) if bank_zone else None
+    )
+    if bank_holidays is not None:
+        for name, d in JoursFeries.for_year(year, bank_zone).items():
+            bank_holidays[d].append(name)
+
+    timestamp_key = "00:00"
+    # means full day…
+
+    for mon in range(1, 12 + 1):
+        for day in range(1, 31 + 1):
+            try:
+                date = datetime.date(year, mon, day)
+            except (TypeError, ValueError):
+                continue
+
+            if school_holidays and date in school_holidays:
+                holiday = school_holidays[date]
+                date_key = date.isoformat()
+                events[date_key][timestamp_key].append(
+                    DailyEvent(
+                        datetime.datetime(date.year, date.month, date.day),
+                        0,
+                        holiday.get("nom_vacances", ""),
+                    )
+                )
+
+            if bank_holidays and date in bank_holidays:
+                date_key = date.isoformat()
+                for title in bank_holidays[date]:
+                    events[date_key][timestamp_key].append(
+                        DailyEvent(
+                            datetime.datetime(date.year, date.month, date.day),
+                            0,
+                            title,
+                        )
+                    )
 
 
 if __name__ == "__main__":
@@ -438,10 +489,23 @@ if __name__ == "__main__":
 
     doc = initialize_document(year)
     links_mapping = generate_links(doc)
-    events: Dict[str, List[DailyEvent]] = {}
-    collect_holidays(year, events, zone=args["zone"])
+    events: DefaultDict[str, DefaultDict[str, List[DailyEvent]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    if locale.getlocale()[0] == "fr_FR" and (
+        args["school_zone"] or args["bank_holidays"]
+    ):
+        LOGGER.info("Collecting French holidays")
+        collect_french_holidays(
+            year,
+            events,
+            school_zone=args["school_zone"],
+            bank_zone=args["bank_holidays"],
+        )
 
-    add_months_page(doc, links_mapping, events)
+    add_months_page(
+        doc, links_mapping, cast(Dict[str, Dict[str, List[DailyEvent]]], events)
+    )
 
     time_block_line_width = args["linewidth"]
     time_block_line_color = args["linecolor"]
