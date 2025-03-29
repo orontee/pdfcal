@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """Generate calendar in PDF format."""
 
 import argparse
@@ -7,12 +5,12 @@ import datetime
 import locale
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Any, cast, DefaultDict, Dict, List, Tuple, Optional
+from typing import cast, DefaultDict, Dict, List, Tuple
+
+from .events import DailyEvent
+from .holidays import collect_french_holidays
 
 from fpdf import FPDF
-from jours_feries_france import JoursFeries
-from vacances_scolaires_france import SchoolHolidayDates
 
 LOGGER = logging.getLogger(__name__)
 LOGGER.addHandler(logging.StreamHandler())
@@ -48,14 +46,6 @@ MONTH_COLOR: List[Tuple[int, int, int]] = [
 
 locale.setlocale(locale.LC_ALL, "")
 # propagate OS locale
-
-
-@dataclass
-class DailyEvent:
-    start: datetime.datetime
-    duration: int
-    title: str
-
 
 DAYS: List[str] = []
 FULLDAYS: List[str] = []
@@ -102,9 +92,9 @@ def initialize_document(year: int) -> FPDF:
     doc.set_margins(0, 0)
     doc.set_auto_page_break(False)
     doc.set_title("Agenda for %04d" % (year))
-    doc.set_author("pdfcal")
-    doc.add_font(FONT, "", fname="fonts/DejaVuSansCondensed.ttf")
-    doc.add_font(FONT, "B", fname="fonts/DejaVuSansCondensed-Bold.ttf")
+    doc.set_author("repdfcal")
+    doc.add_font(FONT, "", fname="repdfcal/fonts/DejaVuSansCondensed.ttf")
+    doc.add_font(FONT, "B", fname="repdfcal/fonts/DejaVuSansCondensed-Bold.ttf")
 
     return doc
 
@@ -428,57 +418,6 @@ def get_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def collect_french_holidays(
-    year: int,
-    events: DefaultDict[str, DefaultDict[str, List[DailyEvent]]],
-    school_zone: Optional[str],
-    bank_zone: Optional[str],
-):
-    school_holidays = (
-        SchoolHolidayDates().holidays_for_year_and_zone(year, school_zone)
-        if school_zone
-        else None
-    )
-    bank_holidays: Optional[DefaultDict[datetime.date, List[str]]] = (
-        defaultdict(list) if bank_zone else None
-    )
-    if bank_holidays is not None:
-        for name, d in JoursFeries.for_year(year, bank_zone).items():
-            bank_holidays[d].append(name)
-
-    timestamp_key = "00:00"
-    # means full day…
-
-    for mon in range(1, 12 + 1):
-        for day in range(1, 31 + 1):
-            try:
-                date = datetime.date(year, mon, day)
-            except (TypeError, ValueError):
-                continue
-
-            if school_holidays and date in school_holidays:
-                holiday = school_holidays[date]
-                date_key = date.isoformat()
-                events[date_key][timestamp_key].append(
-                    DailyEvent(
-                        datetime.datetime(date.year, date.month, date.day),
-                        0,
-                        holiday.get("nom_vacances", ""),
-                    )
-                )
-
-            if bank_holidays and date in bank_holidays:
-                date_key = date.isoformat()
-                for title in bank_holidays[date]:
-                    events[date_key][timestamp_key].append(
-                        DailyEvent(
-                            datetime.datetime(date.year, date.month, date.day),
-                            0,
-                            title,
-                        )
-                    )
-
-
 if __name__ == "__main__":
     parser = get_parser()
     args = vars(parser.parse_args())
@@ -489,7 +428,7 @@ if __name__ == "__main__":
 
     doc = initialize_document(year)
     links_mapping = generate_links(doc)
-    events: DefaultDict[str, DefaultDict[str, List[DailyEvent]]] = defaultdict(
+    events: Dict[str, Dict[str, List[DailyEvent]]] = defaultdict(
         lambda: defaultdict(list)
     )
     if locale.getlocale()[0] == "fr_FR" and (
@@ -498,14 +437,12 @@ if __name__ == "__main__":
         LOGGER.info("Collecting French holidays")
         collect_french_holidays(
             year,
-            events,
+            cast(DefaultDict[str, DefaultDict[str, List[DailyEvent]]], events),
             school_zone=args["school_zone"],
             bank_zone=args["bank_holidays"],
         )
 
-    add_months_page(
-        doc, links_mapping, cast(Dict[str, Dict[str, List[DailyEvent]]], events)
-    )
+    add_months_page(doc, links_mapping, events)
 
     time_block_line_width = args["linewidth"]
     time_block_line_color = args["linecolor"]
@@ -520,7 +457,7 @@ if __name__ == "__main__":
             year,
             mon,
             -1,
-            (PAGE_WIDTH - LEFT_MARGIN) / 7,
+            (PAGE_WIDTH - LEFT_MARGIN) // 7,
             LEFT_MARGIN,
             0,
             links_mapping,

@@ -25,5 +25,5 @@ To include French school and bank holidays, set current locale to
 and/or a bank holiday zone (`--bank-holidays`):
 
 ``` shell
-(env)$ ./make-calendar --school-zone C --bank-holidays Métropole
+(env)$ python -m repdfcal --school-zone C --bank-holidays Métropole
 ```
