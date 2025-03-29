@@ -22,6 +22,9 @@ PAGE_HEIGTH = 280
 
 # clear the remarkable tool bar
 LEFT_MARGIN = 20
+RIGHT_MARGIN = 20
+TOP_MARGIN = 20
+BOTTOM_MARGIN = 20
 
 locale.setlocale(locale.LC_ALL, "")
 # propagate OS locale
@@ -119,10 +122,12 @@ def insert_calendar(
 
     doc.set_xy(x, y)
     doc.cell(w=7 * size, h=1.5 * size, text=header, align="C", fill=True, link=link)
+
     y += int(size * 1.5)
 
     # draw the days of the week above the table
     doc.set_fill_color(180)
+    doc.set_text_color(0)
     doc.set_font(FONT, "", size)
     for weekday in range(0, 7):
         doc.set_xy(x + weekday * size, y)
@@ -238,31 +243,6 @@ def add_day_page(
         ysize=cal_size - 0.0,
     )
 
-    if mon > 1:
-        insert_calendar(
-            doc,
-            year,
-            mon - 1,
-            -1,
-            int(cal_size * 0.5),
-            cal_x,
-            cal_y + cal_h,
-            links_mapping,
-            events,
-        )
-    if mon < 12:
-        insert_calendar(
-            doc,
-            year,
-            mon + 1,
-            -1,
-            int(cal_size * 0.5),
-            int(cal_x + cal_w / 2),
-            cal_y + cal_h,
-            links_mapping,
-            events,
-        )
-
     # big date and day of week
     doc.set_font(FONT, "B", 125)
     doc.set_xy(cal_x, date_y + 8)
@@ -286,40 +266,25 @@ def add_day_page(
         ),
     )
 
-    # add the time blocks
+    # add the todo blocks
     doc.set_draw_color(time_block_line_color)
     doc.set_line_width(time_block_line_width)
     doc.set_fill_color(240)
     doc.set_text_color(40)
-    doc.set_font(FONT, "B", 16)
 
-    hour_h = PAGE_HEIGTH / 30
+    line_height = PAGE_HEIGTH / 30
     for i in range(1, 30):
-        line_y = i * hour_h
-        # if i < 7:
-        line_x = cal_x - 8
-        # else:
-        # 	line_x = w * 0.6 - 2.5
+        line_y = i * line_height + TOP_MARGIN
+        if line_y > PAGE_HEIGTH - BOTTOM_MARGIN:
+            break
+
+        if line_y < cal_y + cal_h:
+            line_x = cal_x - 8
+        else:
+        	line_x = PAGE_WIDTH - RIGHT_MARGIN
+
         doc.line(LEFT_MARGIN, line_y, line_x, line_y)
 
-        if i % 2 != 0:
-            continue
-        doc.set_xy(LEFT_MARGIN, line_y - 0)
-        doc.cell(
-            w=hour_h,
-            h=hour_h,
-            text="%02d" % (i // 2 + start_h),
-            align="C",
-        )
-        doc.rect(LEFT_MARGIN, line_y, hour_h, hour_h)
-
-    # add the todo blocks
-    todo_h = hour_h + 1.5
-    for i in range(0, 13):
-        line_y = i * todo_h + cal_y + cal_h * 1.5 + todo_h
-        line_x = cal_x - 4
-        doc.line(line_x, line_y, PAGE_WIDTH, line_y)
-        doc.rect(line_x, line_y - todo_h / 2, todo_h / 2, todo_h / 2)
 
     # add prepopulated entries if there are any
     if not (day_events := events.get(ymd)):
@@ -328,58 +293,26 @@ def add_day_page(
     all_day = ""
 
     doc.set_font(FONT, "", 10)
-    ev_x_base = LEFT_MARGIN + hour_h + 2
+    line_x = cal_x - 8
+    ev_x_base = LEFT_MARGIN + line_height + 2
     ev_w = (line_x - ev_x_base - 10) / 2
 
     # support up to three overlapping events
     tracks = [0, 0, 0]
 
+    events_text: str = ""
     for hms, evs in sorted(day_events.items()):
         for ev in evs:
             if hms == "00:00" and ev[0] == 0:
-                # this is an all day event
-                # print("adding", ev)
                 all_day += ev[1] + "\n"
                 continue
-            # time bounded; if it is less than the earliest time,
-            # draw it at the start time.
-            ev_hour, ev_min = [int(_) for _ in hms.split(":")]
-
-            if ev_hour < start_h:
-                ev_hour = start_h
-                ev_min = 0
-            if ev_hour > start_h + 15:
-                ev_hour = start_h + 15
-                ev_min = 0
-
-            ev_y = hour_h * (ev_hour * 2 + ev_min / 30 - start_h * 2)
-            ev_h = (ev[0] / 1800) * hour_h
-
-            # find the first track that this event fits in
-            for indent in range(0, len(tracks)):
-                if ev_y < tracks[indent]:
-                    continue
-                tracks[indent] = ev_y + ev_h
-                ev_x = ev_x_base + (ev_w + 2) * indent
-                break
-
-            doc.rect(
-                ev_x,
-                ev_y,
-                ev_w,
-                ev_h,
-                style="F",
-            )
-
-            doc.set_xy(ev_x, ev_y)
-            doc.multi_cell(w=ev_w, h=10 / 2, align="L", text=hms + ": " + ev[1])
 
     if all_day:
         doc.set_font(FONT, "B", 16)
-        doc.set_xy(LEFT_MARGIN, 0)
+        doc.set_xy(LEFT_MARGIN, TOP_MARGIN)
         doc.multi_cell(
             w=line_x - LEFT_MARGIN,
-            h=hour_h / 2,
+            h=line_height / 2,
             text=all_day,
             align="C",
         )
