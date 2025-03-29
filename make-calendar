@@ -9,6 +9,7 @@ from icalendar import Calendar
 from ical2csv import process_ical
 import argparse
 from typing import Any, Dict, List
+from process_vacances_scolaires import collect_holidays
 
 FONT = "dejavu"
 
@@ -449,6 +450,7 @@ def get_parser() -> argparse.ArgumentParser:
         type=float,
         default=200,
     )
+    parser.add_argument('-z','--zone', help='zone for holidays (C default)', required=False, type=str, default="C")
     parser.add_argument("cal", nargs="*", help="iCal formatted files to collect events from")
     return parser
 
@@ -464,6 +466,7 @@ if __name__ == "__main__":
     pdf = initialize_document(year)
     links = generate_links(pdf)
     entries = collect_ical_events(year)
+    collect_holidays(year, entries, zone=args['zone'])
 
     add_month_pages(pdf, links, entries)
 
