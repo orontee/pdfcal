@@ -1,6 +1,6 @@
 # reMarkable PDF calendar
 
-Page-per-day calendar, generated for Remarkable tablet.
+Page-per-day calendar, generated for reMarkable tablet.
 
 French school and bank holidays can be included.
 
